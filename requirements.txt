@@ -1,0 +1,6 @@
+pandas
+pyarrow
+scikit-learn
+torch
+transformers
+huggingface_hub

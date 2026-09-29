@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Навыки для IT-должности</title>
+<style>
+:root{--bg:#fafafa;--fg:#1a1a1a;--muted:#666;--card:#fff;--line:#e5e5e5;--bar:#2f6fed}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#eee;--muted:#999;--card:#1e1e1e;--line:#333;--bar:#6b9bff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.5rem;margin:0 0 4px}.muted{color:var(--muted);font-size:.9rem}
+form{display:flex;gap:8px;margin:20px 0 8px}input{flex:1;min-width:0;padding:10px 12px;font:inherit;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)}
+button{padding:10px 16px;font:inherit;border:0;border-radius:8px;background:var(--bar);color:#fff;cursor:pointer}button:disabled{opacity:.5}
+.ex{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}.ex span{font-size:.85rem;padding:3px 10px;border:1px solid var(--line);border-radius:99px;cursor:pointer;background:var(--card)}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 3.5rem;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.name{overflow-wrap:anywhere}.track{height:6px;background:var(--line);border-radius:3px;margin-top:4px}.fill{height:6px;background:var(--bar);border-radius:3px}
+.p{text-align:right;font-variant-numeric:tabular-nums}.warn{margin:12px 0;padding:10px 12px;border-radius:8px;background:var(--card);border:1px solid var(--line);font-size:.9rem}
+a{color:var(--bar)}
+</style>
+</head>
+<body><main>
+<h1>Какие навыки нужны для IT-должности</h1>
+<div class="muted">Модель rubert-tiny2, дообученная на 51 тыс. IT-вакансий hh.ru (2023). Работает прямо в браузере, без сервера.
+Число — оценка вероятности, что навык укажут в вакансии с таким названием.</div>
+<form id="f"><input id="q" placeholder="Например: Backend-разработчик Go" autocomplete="off"><button id="b" disabled>Загрузка…</button></form>
+<div class="ex" id="ex"></div>
+<div id="status" class="muted">Загружаю модель (~30 МБ)…</div>
+<div id="out"></div>
+<p class="muted">Модель, метрики и ограничения: <a href="https://huggingface.co/MrAlexGov/it-job-title-to-skills-rubert-tiny2">карточка модели</a> ·
+<a href="https://github.com/MrAlexGov/it-job-title-to-skills">код</a> · <a href="https://huggingface.co/datasets/MrAlexGov/it-job-title-skills-ru">датасет</a></p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+<script type="module">
+import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.2.4";
+const REPO = "MrAlexGov/it-job-title-to-skills-rubert-tiny2";
+const base = `https://huggingface.co/${REPO}/resolve/main/`;
+const $ = id => document.getElementById(id);
+const EX = ["Python-разработчик","DevOps инженер","Системный аналитик","Frontend-разработчик React","Разработчик 1С","Data Scientist","QA Automation Engineer"];
+$("ex").innerHTML = EX.map(e => `<span>${e}</span>`).join("");
+let tok, sess, vocab;
+try {
+  ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+  [tok, sess, vocab] = await Promise.all([
+    AutoTokenizer.from_pretrained(REPO),
+    ort.InferenceSession.create(base + "model_full_int8.onnx"),
+    fetch(base + "skill_vocab.json").then(r => r.json()),
+  ]);
+  $("b").disabled = false; $("b").textContent = "Показать"; $("status").textContent = "";
+} catch (e) { $("status").textContent = "Не удалось загрузить модель: " + e.message; }
+
+async function run(title) {
+  const enc = await tok(title, { truncation: true, max_length: 32 });
+  const t = x => new ort.Tensor("int64", BigInt64Array.from(Array.from(x.data, BigInt)), x.dims);
+  const { probs } = await sess.run({ input_ids: t(enc.input_ids), attention_mask: t(enc.attention_mask) });
+  const p = probs.data, idx = [...p.keys()].sort((a, b) => p[b] - p[a]).slice(0, 15);
+  const max = p[idx[0]];
+  $("out").innerHTML = (max < 0.3 ? `<div class="warn">Максимальная вероятность ниже 0.3 — похоже, модель плохо знает эту должность (данные 2023 года). Рекомендациям не доверяйте.</div>` : "") +
+    idx.map(i => `<div class="row"><div><div class="name">${vocab[i]}</div><div class="track"><div class="fill" style="width:${(p[i]*100).toFixed(0)}%"></div></div></div><div class="p">${p[i].toFixed(2)}</div></div>`).join("");
+}
+$("f").onsubmit = e => { e.preventDefault(); const q = $("q").value.trim(); if (q && sess) run(q); };
+$("ex").onclick = e => { if (e.target.tagName === "SPAN" && sess) { $("q").value = e.target.textContent; run(e.target.textContent); } };
+</script>
+</body></html>
